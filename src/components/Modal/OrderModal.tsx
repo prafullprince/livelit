@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable react-hooks/exhaustive-deps */
 
-import { memo, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { PiCurrencyInrBold } from "react-icons/pi";
 import Image from "next/image";
@@ -10,11 +10,13 @@ import fallbackImage from "@/assets/Screenshot 2025-02-03 at 23.53.50.png";
 import toast from "react-hot-toast";
 import { useDispatch } from "react-redux";
 import { setOpenChatMobile } from "@/redux/slice/chat.slice";
-
+import socket from "@/utills/socket";
 
 const location = ["Delhi", "Mumbai", "Banglore", "Pune", "Hyderabad"];
 const prices = [50, 100, 150, 200, 250];
 
+
+// IFormData
 export interface IFormData {
   location: string;
   date: string;
@@ -29,6 +31,7 @@ export interface IFormData {
   eventId: any;
 }
 
+// Component
 const OrderModal = ({
   modalData,
   setModalData,
@@ -36,13 +39,9 @@ const OrderModal = ({
   router,
   session,
 }: any) => {
+
   // hook
   const btnRef = useRef<HTMLDivElement | null>(null);
-  const PING_INTERVAL = 25000; // 25 seconds
-  const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const RECONNECT_INTERVAL = 3000;
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const socketref = useRef<WebSocket | null>(null);
   const dispatch = useDispatch();
 
   // state  
@@ -76,7 +75,7 @@ const OrderModal = ({
     }));
   };
 
-  // sideEffect
+  // click outside
   useEffect(() => {
     function clickOutsideHandler(e: MouseEvent) {
       if (btnRef.current && !btnRef.current.contains(e.target as Node)) {
@@ -89,7 +88,7 @@ const OrderModal = ({
     };
   }, []); 
 
-  // sideEffect -> totalPrice
+  // totalPrice
   useEffect(() => {
     if (formData.unit && formData.cabFare) {
       setFormData((prevState) => ({
@@ -101,7 +100,7 @@ const OrderModal = ({
     }
   }, [formData.unit, formData.cabFare]);
 
-  // sideEffect -> date
+  // date
   useEffect(() => {
     const today = new Date();
     const maxDate = new Date();
@@ -113,99 +112,54 @@ const OrderModal = ({
     setMaxDate(maxDateString);
   }, [formData.date]);
 
-  // socket
+  // handle socket
   useEffect(() => {
-
     if(!session || !modalData) return;
-
-    let socket: WebSocket;
-
-    const connectWebSocket = () => {
-      socket = new WebSocket("wss://rent-a-buddy-server-1.onrender.com");
-      socketref.current = socket;
-
-      // on open
-      socket.onopen = () => {
-        console.log("socket open");
-
-        // Start pinging
-        pingIntervalRef.current = setInterval(() => {
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: "ping" }));
-          }
-        }, PING_INTERVAL);
-
-        // reconnect
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-          reconnectTimeoutRef.current = null;
-        }
-      };
-
-      // on close
-      socket.onclose = (event) => {
-        console.log("❌ WebSocket closed", event.reason || event.code);
-
-        // Schedule reconnection
-        if (!reconnectTimeoutRef.current) {
-          reconnectTimeoutRef.current = setTimeout(() => {
-            console.log("🔁 Attempting to reconnect...from order modal");
-            connectWebSocket();
-          }, RECONNECT_INTERVAL);
-        }
-
-        // Stop pinging
-        if (pingIntervalRef.current) {
-          clearInterval(pingIntervalRef.current);
-          pingIntervalRef.current = null;
-        }
-
-      };
-
-      // on error
-      socket.onerror = (error) => {
-        console.log("socket error", error);
-      };
-
-      // on message
-      socket.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-
-          if (data.type === "orderStatus") {
-            console.log("orderStatus", data.payload);
     
-            if (data?.payload?.success) {
-              toast.success(data?.payload?.message);
-              router.push(
-                `/chat/${data?.payload?.data?.chatId}/user/${data?.payload?.data?.receiver}`
-              );
-              setLoading(false);
-              setModalData(null);
-              dispatch(setOpenChatMobile(true));
-            } else {
-              toast.error(data.payload.message);
-              setModalData(null);
-              setLoading(false);
-            }
-          }
-        } catch (err) {
-          console.error("Invalid JSON received via WebSocket:", event.data);
-        }
-      };
+    // handle connect
+    const handleConnect = () => {
+      console.log("connected");
     };
-    connectWebSocket();
 
-    // memory cleanup
+    // handle disconnect
+    const handleDisconnect = () => {
+      console.log("disconnected");
+    };
+
+    // handle error
+    const handleError = () => {
+      console.log("error");
+      toast.error("Socket error");
+    };
+
+    // handle newOrder
+    const handleNewOrder = (data: any) => {
+      console.log("newOrder", data);
+      toast.success("Order sent");
+      setModalData(null);
+      setLoading(false);
+      dispatch(setOpenChatMobile(true));
+    };
+
+    // socket handlers
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("error", handleError);
+    socket.on("newOrder", handleNewOrder);
+
+    if(!socket.connected) {
+      console.log("d")
+      socket.connect();
+    }
+
+    // cleanup
     return () => {
-      if (socketref.current) {
-        socketref.current.close();
-      }
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("error", handleError);
+      socket.off("newOrder", handleNewOrder);
     };
-    
+
   }, [session, modalData]);
 
   return (
@@ -468,19 +422,12 @@ const OrderModal = ({
                   return;
                 }
 
-                if(socketref?.current?.readyState === WebSocket.OPEN) {
-                  console.log("sending order request", socketref?.current?.readyState);
+                // send request
+                if(socket?.connected) {
                   setLoading(true);
-                  socketref.current.send(
-                    JSON.stringify({
-                      type: "requestOrder",
-                      payload: {
-                        formData
-                      },
-                    })
-                  );
+                  socket.emit("requestOrder", formData);
                 } else {
-                  toast.error("Socket not found");
+                  toast.error("Socket not connected");
                 }
               }}
               disabled={loading}

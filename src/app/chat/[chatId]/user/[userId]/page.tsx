@@ -31,6 +31,7 @@ import { setOpenChatMobile } from "@/redux/slice/chat.slice";
 import { AnimatePresence, motion } from "framer-motion";
 import { FaVideo } from "react-icons/fa";
 import { SlCallEnd } from "react-icons/sl";
+import socket from "@/utills/socket";
 
 // Define types for better maintainability
 interface Message {
@@ -90,7 +91,6 @@ const Page = () => {
   const [isRemote, setIsRemote] = useState(true);
   const [isAudioCall, setIsAudioCall] = useState(false);
 
-
   const [seenMessage, setSeenMessage] = useState(false);
 
   // --- WebRTC Setup ---
@@ -134,7 +134,8 @@ const Page = () => {
 
   // handleVideoCall
   const handleVideoCall = async () => {
-    if (!chatId || !userDetails?._id || !socketRef.current || isAudioCall) return;
+    if (!chatId || !userDetails?._id || !socketRef.current || isAudioCall)
+      return;
 
     // createPeerConnection
     const pc = setupPeerConnection();
@@ -192,7 +193,8 @@ const Page = () => {
 
   // handleAudioCall
   const handleAudioCall = async () => {
-    if (!chatId || !userDetails?._id || !socketRef.current || !isAudioCall) return;
+    if (!chatId || !userDetails?._id || !socketRef.current || !isAudioCall)
+      return;
     setIsAudioCall(true);
 
     // Create PeerConnection
@@ -202,15 +204,15 @@ const Page = () => {
     try {
       // stream
       const stream = await navigator.mediaDevices.getUserMedia({
-        video:false,
-        audio: true
+        video: false,
+        audio: true,
       });
 
       // save stream in localStreamRef
       localStreamRef.current = stream;
 
       // Add tracks to PeerConnection
-      stream.getTracks().forEach((track)=> pc.addTrack(track, stream));
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
       // Show local video
       if (localVideoRef.current) {
@@ -238,9 +240,9 @@ const Page = () => {
       } catch (error) {
         console.log(error);
       }
-    } 
-  }
-  
+    };
+  };
+
   // handleAccept
   const handleAccept = async () => {
     if (!socketRef.current || !incomingOffer || !chatId || !userDetails?._id)
@@ -353,48 +355,39 @@ const Page = () => {
     setIsCallModal(false);
   };
 
-  // Fetch Messages
-  const fetchMessages = async () => {
-    setLoading(true);
-    try {
-      const response = await fetchMessage(chatId, session?.serverToken);
-      setMessages(Array.isArray(response) ? response : []);
-    } catch (error) {
-      console.error("Error fetching messages:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // sendMessage
   const sendMessage = () => {
-    const message = chatRef.current.trim();
-    if (!socketRef.current || !message) return;
 
+    // validation
+    const message = chatRef.current.trim();
+    if (!message) return;
+    if(!socket.connected) socket.connect();
+    setMsgLoading(true);
+
+    // msg payload
     const messagePayload = {
-      type: "sendMessage",
-      payload: {
         chatId: chatId,
         sender: userDetails?._id,
         receiver: userId,
         text: message,
         type: "text",
-      },
     };
 
-    console.log("first");
-
-    if (socketRef.current?.readyState === WebSocket.OPEN) {
-      setMsgLoading(true);
-      console.log("second");
-      socketRef.current.send(JSON.stringify(messagePayload));
-    } else {
-      toast.error("Connection lost. Refresh the page to reconnect.");
-      // connectWebSocket();
-    }
+    // send message
+    socket.emit("sendMessage", messagePayload);
+    
     chatRef.current = ""; // clear ref manually
     const inputElement = document.querySelector<HTMLInputElement>("input");
     if (inputElement) inputElement.value = ""; // clear UI input
+  };
+
+  // Handle Enter Key for Sending Message
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      sendMessage();
+      chatRef.current = "";
+    }
   };
 
   // Fetch User Details
@@ -417,198 +410,102 @@ const Page = () => {
     }
   };
 
-  // Fetch Data
+  // Fetch Messages
+  const fetchMessages = async () => {
+    setLoading(true);
+    try {
+      const response = await fetchMessage(chatId, session?.serverToken);
+      setMessages(Array.isArray(response) ? response : []);
+    } catch (error) {
+      console.error("Error fetching messages:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Api call -> messages, other user
   useEffect(() => {
     if (!chatId || !session || !userId) return;
     fetchMessages();
     fetchOtherUsers();
   }, [chatId, session?.serverToken, refreshButton, userId]);
 
+  // Api call -> fetch user details
   useEffect(() => {
     if (!session) return;
     fetchUserDetails();
   }, [session?.serverToken]);
 
-  // Handle WebSocket Connection
+  // handle socket connection
   useEffect(() => {
-    if (!chatId || !userDetails?._id) return;
+    if (!userDetails || !chatId) return;
 
-    let socket: WebSocket;
-
-    const connectWebSocket = () => {
-      socket = new WebSocket("wss://rent-a-buddy-server-1.onrender.com");
-      socketRef.current = socket;
-
-      socket.onopen = () => {
-        console.log("WebSocket connected");
-
-        // Register user
-        socket.send(
-          JSON.stringify({
-            type: "register",
-            payload: {
-              chatId: chatId,
-              userId: userDetails?._id,
-            },
-          })
-        );
-
-        // Start pinging
-        pingIntervalRef.current = setInterval(() => {
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: "ping" }));
-          }
-        }, PING_INTERVAL);
-
-        // reconnect
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-          reconnectTimeoutRef.current = null;
-        }
-      };
-
-      socket.onclose = (event) => {
-        console.log("❌ WebSocket closed", event.reason || event.code);
-
-        // Stop pinging
-        if (pingIntervalRef.current) {
-          clearInterval(pingIntervalRef.current);
-          pingIntervalRef.current = null;
-        }
-
-        // Schedule reconnection
-        if (!reconnectTimeoutRef.current) {
-          reconnectTimeoutRef.current = setTimeout(() => {
-            console.log("🔁 Attempting to reconnect...");
-            connectWebSocket();
-          }, RECONNECT_INTERVAL);
-        }
-      };
-      socket.onerror = (error) => console.error("WebSocket Error", error);
-
-      socket.onmessage = async (event) => {
-        const data = JSON.parse(event.data);
-
-        // receive message
-        if (data.type === "receiveMessage") {
-          setMessages((prev) => [...prev, data.payload]);
-          setMsgLoading(false);
-        }
-
-        // reload chat
-        if (data.type === "reloadChat") {
-          fetchMessages();
-        }
-
-        // accept order
-        if (data.type === "orderAccepted") {
-          toast.success(data.payload.message);
-          setRefreshButton((prev) => !prev);
-          setAcceptLoading(false);
-        }
-
-        // pong
-        if (data?.type === "pong") {
-          console.log("🏓 Pong received from server");
-        }
-
-        // markAsReadYourMessage
-        if (data?.type === "markAsReadYourMessage") {
-          setSeenMessage(true);
-        }
-
-        // --- createOffer ---
-        if (data.type === "createOffer") {
-          setIncomingOffer(data.payload);
-          setIsCallModal(true);
-        }
-
-        // --- createAnswer ---
-        if (data.type === "createAnswer") {
-          if (pcRef.current) {
-            // const sdp = data.payload;
-            await pcRef.current.setRemoteDescription(data.payload);
-            setIsCallAccepted(true);
-          }
-        }
-
-        // --- add-ice-candidate ---
-        if (data.type === "add-ice-candidate") {
-          // const { candidate } = data.payload;
-          pcRef.current?.addIceCandidate(data.payload);
-        }
-
-        // --- endCall ---
-        if (data.type === "endCall") {
-          // 1. Stop local media tracks
-          if (localStreamRef.current) {
-            localStreamRef.current.getTracks().forEach((track) => track.stop());
-            localStreamRef.current = null;
-          }
-
-          // 2. Close the PeerConnection
-          if (pcRef.current) {
-            pcRef.current.close();
-            pcRef.current = null;
-          }
-
-          // 3. Reset video refs
-          if (localVideoRef.current) {
-            localVideoRef.current.srcObject = null;
-          }
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = null;
-          }
-
-          // 6. Reset UI states
-          setIsCallStart(false);
-          setIsCallAccepted(false);
-          setIncomingOffer(null);
-          setIsCallModal(false);
-        }
-      };
+    // handle connect
+    const handleConnect = () => {
+      
+      // registerUserInChat
+      socket.emit("registerUserInChat", {
+        chatId: chatId,
+        userId: userDetails._id,
+      });
     };
-    connectWebSocket();
+
+    // handle disconnect
+    const handleDisconnect = () => {
+      console.log("disconnected");
+    };
+
+    // handle error
+    const handleError = () => {
+      console.log("error");
+      toast.error("Socket error");
+    };
+
+    // handle connected
+    const handleConnected = () => {
+      toast.success("connected");
+    };
+
+    // handle receiveMessage
+    const handleReceiveMessage = (data: any) => {
+      setMessages((prev) => [...prev, data]);
+      setMsgLoading(false);
+    };
+
+    // handle reloadChat
+    const handleReloadChat = () => {
+      fetchMessages();
+    };
+
+    // socket handlers
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("error", handleError);
+    socket.on("Connected", handleConnected);
+    socket.on("receiveMessage", handleReceiveMessage);
+    socket.on("reloadChat", handleReloadChat);
+
+    // socket connection
+    if (!socket.connected) {
+      socket.connect();
+    } else {
+      handleConnect();
+    }
+
+    // when user in particular chat
+    socket.emit("openChat", { chatId, userId: userDetails._id });
 
     // cleanup
     return () => {
-      if (pingIntervalRef.current) {
-        clearInterval(pingIntervalRef.current);
-      }
-      if (socketRef.current) {
-        socketRef.current.close();
-      }
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      socket.onmessage = null;
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("error", handleError);
+      socket.off("Connected", handleConnected);
+      socket.emit("closeChat", { chatId, userId: userDetails._id });
+      socket.off("receiveMessage", handleReceiveMessage);
+      socket.off("reloadChat", handleReloadChat);
     };
-  }, [chatId, userDetails?._id, pathName]);
-
-  // open chat and close chat
-  useEffect(() => {
-    if (!chatId || !userDetails?._id) return;
-
-    if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(
-        JSON.stringify({
-          type: "openChat",
-          payload: { chatId, userId: userDetails._id },
-        })
-      );
-    }
-
-    return () => {
-      if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(
-          JSON.stringify({
-            type: "closeChat",
-            payload: { chatId, userId: userDetails._id },
-          })
-        );
-      }
-    };
-  }, [chatId, userDetails?._id]);
+  }, [chatId, userDetails]);
 
   // Auto-scroll to the latest message
   useEffect(() => {
@@ -625,15 +522,6 @@ const Page = () => {
       localVideoRef.current.srcObject = localStreamRef.current;
     }
   }, [isCallStart, isCallAccepted]);
-
-  // Handle Enter Key for Sending Message
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      sendMessage();
-      chatRef.current = "";
-    }
-  };
 
   // shift video
   useEffect(() => {
@@ -781,7 +669,8 @@ const Page = () => {
 
         <button
           onClick={sendMessage}
-          className="bg-black text-white px-4 py-2 rounded-lg text-xl cursor-pointer"
+          disabled={msgLoading}
+          className={`${msgLoading ? "opacity-50" : "opacity-100"} bg-black text-white px-4 py-2 rounded-lg text-xl cursor-pointer`}
         >
           <IoSendSharp />
         </button>

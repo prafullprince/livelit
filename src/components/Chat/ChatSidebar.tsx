@@ -15,14 +15,13 @@ const ChatSidebar = ({
   chatLoading,
   sockty,
   userDetails,
-  numOfUnseenMessages
+  numOfUnseenMessages,
 }: any) => {
-  console.log("chiallChat: ", allChat)
   // hooks
   const router = useRouter();
   const dispatch = useDispatch();
   const { openChatMobile } = useSelector((state: any) => state.chat);
-  console.log("allChat:as ", allChat)
+
   // state
   const [currentChatId, setCurrentChatId] = useState<string>("");
 
@@ -57,12 +56,12 @@ const ChatSidebar = ({
               <div className="h-10 w-10 animate-spin rounded-full border-4 border-solid border-black border-t-transparent"></div>
             </div>
           )}
-          {!chatLoading && sockty && allChat?.length === 0 && (
-            <div className="px-2">No chat available, go and  request order</div>
+          {!chatLoading && sockty && allChat?.data?.length === 0 && (
+            <div className="px-2">No chat available, go and request order</div>
           )}
-          {!chatLoading && allChat?.length > 0 && sockty && (
+          {!chatLoading && allChat?.data?.length > 0 && sockty && (
             <div className="flex flex-col">
-              {allChat?.map((chit: any) => (
+              {allChat?.data?.map((chit: any) => (
                 <div
                   onClick={() => {
                     setCurrentChatId(chit?._id);
@@ -76,7 +75,7 @@ const ChatSidebar = ({
                           userId: userDetails?._id,
                           receiverId: chit?.participants?.find(
                             (usr: any) => usr?._id !== userDetails?._id
-                          )?._id
+                          )?._id,
                         },
                       })
                     );
