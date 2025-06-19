@@ -98,6 +98,7 @@ const Page = () => {
   console.log("inCall", inCall);
   console.log("isCallStart", isCallStart);
   console.log("roomName", roomName);
+  console.log("roomNamesss:   ", localStorage.getItem("roomName"));
 
   // handleVideoCall
   const handleVideoCall = async () => {
@@ -111,6 +112,7 @@ const Page = () => {
     // process
     setIsCallStart(true);
     setRoomName(chatId);
+    localStorage.setItem("roomName", JSON.stringify(chatId));
 
     // send to socket
     socket.emit("startCall", {
@@ -128,7 +130,7 @@ const Page = () => {
 
     // process
     setRoomName(incomingCall.room);
-
+    localStorage.setItem("roomName", JSON.stringify(incomingCall.room));
     // send sender to acknowledgement that you accepted the call
     socket.emit("inCall", { to: userId, room: chatId });
     toast.success("Call Started");
@@ -149,6 +151,7 @@ const Page = () => {
   const handleEndCall = () => {
     if (incomingCall) return;
     setRoomName(null);
+    localStorage.setItem("roomName", JSON.stringify(null));
     setInCall(false);
     setIncomingCall(null);
 
@@ -296,6 +299,7 @@ const Page = () => {
       setInCall(false);
       setRoomName(null);
       setIncomingCall(null);
+      localStorage.setItem("roomName", JSON.stringify(null));
       toast.success("Call ended");
     };
 
@@ -305,6 +309,7 @@ const Page = () => {
       setRoomName(null);
       setIsCallStart(false);
       setIncomingCall(null);
+      localStorage.setItem("roomName", JSON.stringify(null));
       toast.success("Call declined");
     };
 
@@ -544,7 +549,7 @@ const Page = () => {
       </AnimatePresence>
 
       {/* Livekit */}
-      {token && roomName && (
+      {token && localStorage.getItem("roomName") && (
         <div
           style={{ width: "100%", height: "100%" }}
           className="absolute top-0 left-0 right-0 bottom-0"
