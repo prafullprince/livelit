@@ -93,9 +93,11 @@ const Page = () => {
   console.log("token", token);
   const [isCallStart, setIsCallStart] = useState(false);
   const [incomingCall, setIncomingCall] = useState<null | any>(null);
-  console.log("incomingCall", incomingCall);
-  const [isCallModal, setIsCallModal] = useState(false);
   const [inCall, setInCall] = useState(false);
+  console.log("incomingCall", incomingCall);
+  console.log("inCall", inCall);
+  console.log("isCallStart", isCallStart);
+  console.log("roomName", roomName);
 
   // handleVideoCall
   const handleVideoCall = async () => {
@@ -148,6 +150,7 @@ const Page = () => {
     if (incomingCall) return;
     setRoomName(null);
     setInCall(false);
+    setIncomingCall(null);
 
     // send other user to acknowledgement that you declined the call
     socket.emit("endCall", { to: userId, room: chatId });
@@ -292,6 +295,7 @@ const Page = () => {
       console.log("endCall");
       setInCall(false);
       setRoomName(null);
+      setIncomingCall(null);
       toast.success("Call ended");
     };
 
@@ -300,6 +304,7 @@ const Page = () => {
       console.log("declined");
       setRoomName(null);
       setIsCallStart(false);
+      setIncomingCall(null);
       toast.success("Call declined");
     };
 
@@ -491,14 +496,14 @@ const Page = () => {
       </div>
 
       {/* Send Message */}
-      <div className="w-full bg-gray-300 px-4 py-2 flex items-center gap-2 rounded-br-xl">
+      <div className="w-full bg-gray-300 px-4 py-2 flex items-center gap-2 rounded-br-xl relative">
         <input
           type="text"
           defaultValue=""
           onChange={(e) => (chatRef.current = e.target.value)}
           placeholder="Type a message and press enter"
           onKeyDown={handleKeyDown}
-          className="bg-white w-full h-10 px-4 rounded-lg outline-none"
+          className="bg-white w-full h-10 sm:h-10 px-4 rounded-full outline-none shadow-2xl"
         />
 
         <button
@@ -506,7 +511,7 @@ const Page = () => {
           disabled={msgLoading}
           className={`${
             msgLoading ? "opacity-50" : "opacity-100"
-          } bg-black text-white px-4 py-2 rounded-lg text-xl cursor-pointer`}
+          } bg-green-700 text-white px-3 py-2 rounded-lg text-base sm:text-lg cursor-pointer absolute right-6 sm:right-6`}
         >
           <IoSendSharp />
         </button>
