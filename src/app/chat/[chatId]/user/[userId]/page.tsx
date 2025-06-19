@@ -151,7 +151,7 @@ const Page = () => {
   const handleEndCall = () => {
     if (incomingCall) return;
     setRoomName(null);
-    localStorage.setItem("roomName", JSON.stringify(null));
+    localStorage.removeItem("roomName");
     setInCall(false);
     setIncomingCall(null);
 
@@ -299,7 +299,7 @@ const Page = () => {
       setInCall(false);
       setRoomName(null);
       setIncomingCall(null);
-      localStorage.setItem("roomName", JSON.stringify(null));
+      localStorage.removeItem("roomName");
       toast.success("Call ended");
     };
 
@@ -309,7 +309,7 @@ const Page = () => {
       setRoomName(null);
       setIsCallStart(false);
       setIncomingCall(null);
-      localStorage.setItem("roomName", JSON.stringify(null));
+      localStorage.removeItem("roomName");
       toast.success("Call declined");
     };
 
