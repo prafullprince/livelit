@@ -105,3 +105,14 @@ button {
   background-color: var(--button-background);
   color: var(--button-text);
 } */
+
+
+
+/* controlbar */
+.lk-control-bar button {
+  color: white !important;
+  background-color: #333 !important;
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin: 0 8px;
+}

@@ -32,6 +32,20 @@ import { AnimatePresence, motion } from "framer-motion";
 import { FaVideo } from "react-icons/fa";
 import { SlCallEnd } from "react-icons/sl";
 import socket from "@/utills/socket";
+import {
+  LiveKitRoom,
+  GridLayout,
+  ParticipantTile,
+  ControlBar,
+  useTracks,
+  TrackReferenceOrPlaceholder,
+  useRoomContext,
+  useLocalParticipant,
+} from "@livekit/components-react";
+import "@livekit/components-styles";
+import { MdKeyboardVoice, MdMicOff } from "react-icons/md";
+import { LuCamera, LuCameraOff } from "react-icons/lu";
+import { IoMdExit } from "react-icons/io";
 
 // Define types for better maintainability
 interface Message {
@@ -58,20 +72,8 @@ const Page = () => {
   const { data: session } = useSession();
   const divRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<WebSocket | null>(null);
-
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const localVideoRef = useRef<HTMLVideoElement | null>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
-  const remoteStreamRef = useRef<MediaStream | null>(null);
-
-  const RECONNECT_INTERVAL = 3000;
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const PING_INTERVAL = 25000; // 25 seconds
-  const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const router = useRouter();
   const chatRef = useRef<string>("");
-  const pathName = usePathname();
   const dispatch = useDispatch();
 
   // state
@@ -83,299 +85,71 @@ const Page = () => {
   const [acceptLoading, setAcceptLoading] = useState(false);
   const [refreshButton, setRefreshButton] = useState(false);
   const [modalData, setModalData] = useState<any>(null);
-  const [isCallStart, setIsCallStart] = useState(false);
-  const [isIncomingCall, setIncomingCall] = useState(false);
-  const [isCallAccepted, setIsCallAccepted] = useState(false);
-  const [incomingOffer, setIncomingOffer] = useState<any>(null);
-  const [isCallModal, setIsCallModal] = useState(false);
-  const [isRemote, setIsRemote] = useState(true);
-  const [isAudioCall, setIsAudioCall] = useState(false);
-
   const [seenMessage, setSeenMessage] = useState(false);
 
-  // --- WebRTC Setup ---
-  const setupPeerConnection = () => {
-    const pc = new RTCPeerConnection();
-    pcRef.current = pc;
-
-    // add-ice-candidate
-    pc.onicecandidate = (event) => {
-      if (event.candidate && socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(
-          JSON.stringify({
-            type: "add-ice-candidate",
-            payload: {
-              chatId,
-              userId: userId,
-              candidate: event.candidate,
-            },
-          })
-        );
-      }
-    };
-
-    // Prepare remote stream to accumulate tracks
-    remoteStreamRef.current = new MediaStream();
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = remoteStreamRef.current;
-    }
-
-    // Add incoming track to remote stream
-    pc.ontrack = (event) => {
-      remoteStreamRef.current?.addTrack(event.track);
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = event.streams[0];
-        // event.streams[0] or remoteStreamRef.current -> contains the remote stream (coming from the other user)
-      }
-    };
-
-    return pc;
-  };
+  // call state
+  const [token, setToken] = useState<string | null>(null);
+  const [roomName, setRoomName] = useState<null | any>(null);
+  console.log("token", token);
+  const [isCallStart, setIsCallStart] = useState(false);
+  const [isCallAccepted, setIsCallAccepted] = useState(false);
+  const [incomingCall, setIncomingCall] = useState<null | any>(null);
+  console.log("incomingCall", incomingCall);
+  const [isCallModal, setIsCallModal] = useState(false);
 
   // handleVideoCall
   const handleVideoCall = async () => {
-    if (!chatId || !userDetails?._id || !socketRef.current || isAudioCall)
-      return;
+    console.log("videoCall");
+    console.log("incomingCall", incomingCall);
+    console.log("isCallAccepted", isCallAccepted);
+    console.log("token", token);
+    console.log("chatId", chatId);
+    console.log("userId", userId);
+    console.log("socket", socket.connected);
 
-    // createPeerConnection
-    const pc = setupPeerConnection();
+    if (incomingCall || isCallAccepted || !token || !chatId || !userId) return;
+    if (!socket.connected) socket.connect();
 
-    // Get local media stream and add to peer connection
-    try {
-      setIsCallStart(true);
-      // stream
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
+    console.log("ready");
 
-      // save stream in localStreamRef
-      localStreamRef.current = stream;
+    setIsCallStart(true);
+    const room = chatId;
+    setRoomName(room);
 
-      // add tracks to peer connection for receiver
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-
-      // show local video
-      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
-    } catch (err) {
-      console.error("Failed to get local media stream:", err);
-      setIsCallStart(false);
-      return;
-    }
-
-    // When negotiation needed, create and send offer
-    pc.onnegotiationneeded = async () => {
-      try {
-        // createOffer
-        const offer = await pc.createOffer();
-
-        // set offer in LocalDescription
-        await pc.setLocalDescription(offer);
-
-        // send offer to server for receiver
-        if (socketRef.current?.readyState === WebSocket.OPEN) {
-          socketRef.current.send(
-            JSON.stringify({
-              type: "createOffer",
-              payload: {
-                chatId,
-                userId: userId,
-                offer: pc.localDescription,
-              },
-            })
-          );
-        }
-      } catch (err) {
-        console.error("Error during negotiation:", err);
-      }
-    };
-  };
-
-  // handleAudioCall
-  const handleAudioCall = async () => {
-    if (!chatId || !userDetails?._id || !socketRef.current || !isAudioCall)
-      return;
-    setIsAudioCall(true);
-
-    // Create PeerConnection
-    const pc = setupPeerConnection(); // setup ICE, ontrack, etc.
-
-    // Get local media (mic + camera)
-    try {
-      // stream
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: false,
-        audio: true,
-      });
-
-      // save stream in localStreamRef
-      localStreamRef.current = stream;
-
-      // Add tracks to PeerConnection
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-
-      // Show local video
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-    } catch (error) {
-      console.log(error);
-    }
-
-    // When negotiation needed, create and send offer
-    pc.onnegotiationneeded = async () => {
-      try {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        socketRef.current?.send(
-          JSON.stringify({
-            type: "createOffer",
-            payload: {
-              chatId,
-              userId: userDetails?._id,
-              offer: pc.localDescription,
-            },
-          })
-        );
-      } catch (error) {
-        console.log(error);
-      }
-    };
+    // send to socket
+    socket.emit("startCall", { to: userId, from: userDetails?._id, room });
   };
 
   // handleAccept
   const handleAccept = async () => {
-    if (!socketRef.current || !incomingOffer || !chatId || !userDetails?._id)
-      return;
-
+    if (!incomingCall) return;
+    setRoomName(incomingCall.room);
     setIsCallAccepted(true);
-
-    // 1. Create PeerConnection
-    const pc = setupPeerConnection(); // setup ICE, ontrack, etc.
-
-    // 2. Get local media (mic + camera)
-    try {
-      // stream
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
-
-      // save stream in localStreamRef
-      localStreamRef.current = stream;
-
-      // Add tracks to PeerConnection
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-
-      // Show local video
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-    } catch (error) {
-      console.error("Failed to get local media:", error);
-      return;
-    }
-
-    // 3. Set remote description with caller's offer
-    await pc.setRemoteDescription(new RTCSessionDescription(incomingOffer));
-
-    // 4. Create answer
-    const answer = await pc.createAnswer();
-
-    // set answer in LocalDescription
-    await pc.setLocalDescription(answer);
-
-    // 5. Send answer back to caller
-    socketRef.current.send(
-      JSON.stringify({
-        type: "createAnswer",
-        payload: {
-          chatId,
-          userId: userId,
-          sdp: pc.localDescription,
-        },
-      })
-    );
   };
 
   // handleReject
-  const handleReject = () => {
-    // Cleanup peer connection and streams
-    pcRef.current?.close();
-    pcRef.current = null;
-
-    localStreamRef.current?.getTracks().forEach((track) => track.stop());
-    localStreamRef.current = null;
-
-    if (localVideoRef.current) localVideoRef.current.srcObject = null;
-    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
-
-    setIsCallStart(false);
-    setIncomingCall(false);
-    setIsCallAccepted(false);
-    setIsCallModal(false);
-  };
-
-  // handleCallEnd
-  const handleCallEnd = () => {
-    // 1. Stop local media tracks
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => track.stop());
-      localStreamRef.current = null;
-    }
-
-    // 2. Close the PeerConnection
-    if (pcRef.current) {
-      pcRef.current.close();
-      pcRef.current = null;
-    }
-
-    // 3. Reset video refs
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = null;
-    }
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = null;
-    }
-
-    // 5. end from other user too
-    if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(
-        JSON.stringify({
-          type: "endCall",
-          payload: { chatId, userId: userId },
-        })
-      );
-    }
-
-    // 6. Reset UI states
-    setIsCallStart(false);
-    setIsCallAccepted(false);
-    setIncomingOffer(null);
-    setIsCallModal(false);
-  };
+  const handleReject = () => {};
 
   // sendMessage
   const sendMessage = () => {
-
     // validation
     const message = chatRef.current.trim();
     if (!message) return;
-    if(!socket.connected) socket.connect();
+    if (!socket.connected) socket.connect();
     setMsgLoading(true);
 
     // msg payload
     const messagePayload = {
-        chatId: chatId,
-        sender: userDetails?._id,
-        receiver: userId,
-        text: message,
-        type: "text",
+      chatId: chatId,
+      sender: userDetails?._id,
+      receiver: userId,
+      text: message,
+      type: "text",
     };
 
     // send message
     socket.emit("sendMessage", messagePayload);
-    
+
     chatRef.current = ""; // clear ref manually
     const inputElement = document.querySelector<HTMLInputElement>("input");
     if (inputElement) inputElement.value = ""; // clear UI input
@@ -442,7 +216,6 @@ const Page = () => {
 
     // handle connect
     const handleConnect = () => {
-      
       // registerUserInChat
       socket.emit("registerUserInChat", {
         chatId: chatId,
@@ -477,6 +250,13 @@ const Page = () => {
       fetchMessages();
     };
 
+    // handle incomingCall
+    const handleIncomingCall = ({ fromUserId, room }: any) => {
+      console.log("incomingCall");
+      setIncomingCall({ fromUserId, room });
+      setIsCallModal(true);
+    };
+
     // socket handlers
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
@@ -484,6 +264,7 @@ const Page = () => {
     socket.on("Connected", handleConnected);
     socket.on("receiveMessage", handleReceiveMessage);
     socket.on("reloadChat", handleReloadChat);
+    socket.on("incomingCall", handleIncomingCall);
 
     // socket connection
     if (!socket.connected) {
@@ -504,6 +285,7 @@ const Page = () => {
       socket.emit("closeChat", { chatId, userId: userDetails._id });
       socket.off("receiveMessage", handleReceiveMessage);
       socket.off("reloadChat", handleReloadChat);
+      socket.off("incomingCall", handleIncomingCall);
     };
   }, [chatId, userDetails]);
 
@@ -512,34 +294,28 @@ const Page = () => {
     divRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // localStreaming
+  // handle token
   useEffect(() => {
-    if (
-      (isCallStart || isCallAccepted) &&
-      localVideoRef.current &&
-      localStreamRef.current
-    ) {
-      localVideoRef.current.srcObject = localStreamRef.current;
-    }
-  }, [isCallStart, isCallAccepted]);
+    if (!chatId || !userDetails) return;
 
-  // shift video
-  useEffect(() => {
-    if (remoteVideoRef.current) {
-      if (isRemote) {
-        remoteVideoRef.current.srcObject = remoteStreamRef.current;
-      } else {
-        remoteVideoRef.current.srcObject = localStreamRef.current;
+    const fetchToken = async () => {
+      try {
+        const res = await fetch("/api/token", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ room: chatId, userId: userDetails?._id }),
+        });
+        const data = await res.json();
+        setToken(data.token);
+      } catch (error) {
+        console.log("error: ", error);
       }
-    }
-    if (localVideoRef.current) {
-      if (isRemote) {
-        localVideoRef.current.srcObject = localStreamRef.current;
-      } else {
-        localVideoRef.current.srcObject = remoteStreamRef.current;
-      }
-    }
-  }, [isRemote, remoteStreamRef, localStreamRef]);
+    };
+
+    fetchToken();
+  }, [chatId, userDetails]);
 
   // on hard refresh
   useEffect(() => {
@@ -595,7 +371,7 @@ const Page = () => {
 
         {/* icon */}
         <div className="flex items-center gap-6 mr-4">
-          <button onClick={handleAudioCall} className="cursor-pointer">
+          <button className="cursor-pointer">
             <IoCallOutline className="text-2xl text-slate-950" />
           </button>
 
@@ -670,77 +446,17 @@ const Page = () => {
         <button
           onClick={sendMessage}
           disabled={msgLoading}
-          className={`${msgLoading ? "opacity-50" : "opacity-100"} bg-black text-white px-4 py-2 rounded-lg text-xl cursor-pointer`}
+          className={`${
+            msgLoading ? "opacity-50" : "opacity-100"
+          } bg-black text-white px-4 py-2 rounded-lg text-xl cursor-pointer`}
         >
           <IoSendSharp />
         </button>
       </div>
 
-      {/* video */}
-      {(isCallStart || isCallAccepted) && !isAudioCall && (
-        <div className="absolute top-0 right-0 left-0 bottom-1 z-20 flex items-center justify-center rounded-sm shadow-2xl overflow-hidden">
-          {/* Remote Video (full screen) */}
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            className="w-full h-full object-cover z-30"
-          ></video>
-
-          {/* Local Video (small overlay) */}
-          <video
-            onClick={() => setIsRemote((prev: any) => !prev)}
-            ref={localVideoRef}
-            autoPlay
-            playsInline
-            muted
-            className="absolute bottom-4 right-4 w-36 h-40 lg:w-40 lg:h-44 rounded-xl border-1 border-slate-300 shadow-xl object-cover z-40"
-          ></video>
-
-          {/* call managing */}
-          <div className="absolute top-4 z-50 left-1/2 transform -translate-x-1/2 flex gap-4">
-            <button
-              onClick={handleCallEnd}
-              className="bg-red-600 text-xl text-white rounded-full flex items-center justify-center shadow-md hover:bg-red-700 transition-all duration-300 px-4 py-[10px]"
-            >
-              <SlCallEnd />
-            </button>
-            {/* <button className="w-12 h-12 bg-gray-800 text-white rounded-full flex items-center justify-center shadow-md hover:bg-gray-700">
-              <MicIcon />
-            </button> */}
-          </div>
-        </div>
-      )}
-
-      {/* audio */}
-      {(isCallStart || isCallAccepted) && isAudioCall && (
-        <div className="absolute top-0 right-0 left-0 bottom-1 z-20 flex items-center justify-center rounded-sm shadow-2xl overflow-hidden">
-          {/* Remote audio (full screen) */}
-          <audio
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            className="w-full h-full object-cover z-30 bg-slate-200"
-          ></audio>
-
-          {/* call managing */}
-          <div className="absolute top-4 z-50 left-1/2 transform -translate-x-1/2 flex gap-4">
-            <button
-              onClick={handleCallEnd}
-              className="bg-red-600 text-xl text-white rounded-full flex items-center justify-center shadow-md hover:bg-red-700 transition-all duration-300 px-4 py-[10px]"
-            >
-              <SlCallEnd />
-            </button>
-            {/* <button className="w-12 h-12 bg-gray-800 text-white rounded-full flex items-center justify-center shadow-md hover:bg-gray-700">
-              <MicIcon />
-            </button> */}
-          </div>
-        </div>
-      )}
-
       {/* accept/ decline */}
       <AnimatePresence mode="wait">
-        {isCallModal && !isCallAccepted && (
+        {isCallModal && !isCallAccepted && incomingCall && (
           <motion.div
             className="flex items-center gap-3 bg-slate-200 z-50 px-4 py-3 rounded-md absolute top-12 shadow-xl left-[50%] right-[50%] -translate-x-[50%] w-fit"
             initial={{ y: -20 }}
@@ -764,6 +480,27 @@ const Page = () => {
         )}
       </AnimatePresence>
 
+      {/* Livekit */}
+      {token && roomName && (
+        <div
+          style={{ width: "100%", height: "100%" }}
+          className="absolute top-0 left-0 right-0 bottom-0"
+        >
+          <LiveKitRoom
+            token={token}
+            serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL}
+            connect
+            video
+            audio
+          >
+            <GridContent />
+            <div className="mt-2 absolute bottom-5 right-4">
+              <CustomControlBar setToken={setToken} setRoomName={setRoomName} setIsCallAccepted={setIsCallAccepted} setIsCallStart={setIsCallStart} />
+            </div>
+          </LiveKitRoom>
+        </div>
+      )}
+
       {/* sendMoneyModal */}
       {modalData && (
         <SendMoneyModal
@@ -779,3 +516,63 @@ const Page = () => {
 };
 
 export default memo(Page);
+
+// GridContent
+const GridContent = () => {
+  const tracks = useTracks();
+  return (
+    <div className="grid grid-cols-1 gap-0 bg-red-400 h-full">
+      {tracks.map((trackRef: any, index: number) => (
+        <ParticipantTile key={index} trackRef={trackRef} className="bg-gray-800" />
+      ))}
+    </div>
+  );
+};
+
+// CustomControlBar
+const CustomControlBar = ({ setToken, setRoomName, setIsCallAccepted, setIsCallStart }: any) => {
+  const room = useRoomContext();
+  const { localParticipant } = useLocalParticipant();
+
+  const toggleMic = async () => {
+    const isMicEnabled = localParticipant.isMicrophoneEnabled;
+    await localParticipant.setMicrophoneEnabled(!isMicEnabled);
+  };
+
+  const toggleCamera = async () => {
+    const isCamEnabled = localParticipant.isCameraEnabled;
+    await localParticipant.setCameraEnabled(!isCamEnabled);
+  };
+
+  return (
+    <div className="bg-slate-700 w-fit px-4 py-3 rounded-lg flex items-center gap-6">
+      <button onClick={toggleMic} className="text-white cursor-pointer">
+        {localParticipant.isMicrophoneEnabled ? (
+          <MdKeyboardVoice className="text-2xl" />
+        ) : (
+          <MdMicOff className="text-2xl" />
+        )}
+      </button>
+      <button onClick={toggleCamera} className="text-white cursor-pointer">
+        {localParticipant.isCameraEnabled ? (
+          <LuCamera className="text-2xl" />
+        ) : (
+          <LuCameraOff className="text-2xl" />
+        )}
+      </button>
+      <button
+        onClick={() => {
+          room.disconnect();
+
+          // Remove token and room name from parent state
+          setRoomName("");
+          setIsCallAccepted(false);
+          setIsCallStart(false);
+        }}
+        className="text-red-500 cursor-pointer"
+      >
+        <IoMdExit className="text-2xl" />
+      </button>
+    </div>
+  );
+};
