@@ -94,11 +94,7 @@ const Page = () => {
   const [isCallStart, setIsCallStart] = useState(false);
   const [incomingCall, setIncomingCall] = useState<null | any>(null);
   const [inCall, setInCall] = useState(false);
-  console.log("incomingCall", incomingCall);
-  console.log("inCall", inCall);
-  console.log("isCallStart", isCallStart);
-  console.log("roomName", roomName);
-  console.log("roomNamesss:   ", localStorage.getItem("roomName"));
+  const [refreshCallButton, setRefreshCallButton] = useState<boolean>(false);
 
   // handleVideoCall
   const handleVideoCall = async () => {
@@ -154,6 +150,7 @@ const Page = () => {
     localStorage.removeItem("roomName");
     setInCall(false);
     setIncomingCall(null);
+    setRefreshCallButton((prev:any) => !prev);
 
     // send other user to acknowledgement that you declined the call
     socket.emit("endCall", { to: userId, room: chatId });
@@ -298,8 +295,9 @@ const Page = () => {
       console.log("endCall");
       setInCall(false);
       setRoomName(null);
-      setIncomingCall(null);
       localStorage.removeItem("roomName");
+      setIncomingCall(null);
+      setRefreshCallButton((prev:any) => !prev);
       toast.success("Call ended");
     };
 
@@ -307,9 +305,10 @@ const Page = () => {
     const handleDeclined = ({ toUserId, room }: any) => {
       console.log("declined");
       setRoomName(null);
+      localStorage.removeItem("roomName");
       setIsCallStart(false);
       setIncomingCall(null);
-      localStorage.removeItem("roomName");
+      setRefreshCallButton((prev:any) => !prev);
       toast.success("Call declined");
     };
 
