@@ -300,7 +300,7 @@ const Page = () => {
 
     const fetchToken = async () => {
       try {
-        const res = await fetch("/api/token", {
+        const res = await fetch("https://livekit-server-1.onrender.com/api/token", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
