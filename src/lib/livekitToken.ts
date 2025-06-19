@@ -16,3 +16,4 @@ export async function getLiveKitToken(userId: any, roomName: any) {
 
   return jwtToken;
 }
+

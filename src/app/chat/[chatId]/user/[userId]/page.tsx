@@ -43,7 +43,7 @@ import {
   useLocalParticipant,
 } from "@livekit/components-react";
 import "@livekit/components-styles";
-import { MdKeyboardVoice, MdMicOff } from "react-icons/md";
+import { MdCallEnd, MdKeyboardVoice, MdMicOff } from "react-icons/md";
 import { LuCamera, LuCameraOff } from "react-icons/lu";
 import { IoMdExit } from "react-icons/io";
 
@@ -92,43 +92,67 @@ const Page = () => {
   const [roomName, setRoomName] = useState<null | any>(null);
   console.log("token", token);
   const [isCallStart, setIsCallStart] = useState(false);
-  const [isCallAccepted, setIsCallAccepted] = useState(false);
   const [incomingCall, setIncomingCall] = useState<null | any>(null);
   console.log("incomingCall", incomingCall);
   const [isCallModal, setIsCallModal] = useState(false);
+  const [inCall, setInCall] = useState(false);
 
   // handleVideoCall
   const handleVideoCall = async () => {
     console.log("videoCall");
-    console.log("incomingCall", incomingCall);
-    console.log("isCallAccepted", isCallAccepted);
-    console.log("token", token);
-    console.log("chatId", chatId);
-    console.log("userId", userId);
-    console.log("socket", socket.connected);
 
-    if (incomingCall || isCallAccepted || !token || !chatId || !userId) return;
+    // validation
+    if (incomingCall || !token || !chatId || !userId || !userDetails || inCall)
+      return;
     if (!socket.connected) socket.connect();
 
-    console.log("ready");
-
+    // process
     setIsCallStart(true);
-    const room = chatId;
-    setRoomName(room);
+    setRoomName(chatId);
 
     // send to socket
-    socket.emit("startCall", { to: userId, from: userDetails?._id, room });
+    socket.emit("startCall", {
+      to: userId,
+      from: userDetails?._id,
+      room: chatId,
+    });
   };
 
   // handleAccept
   const handleAccept = async () => {
-    if (!incomingCall) return;
+    // validation
+    if (!incomingCall || !token || !chatId || !userId || !userDetails || inCall)
+      return;
+
+    // process
     setRoomName(incomingCall.room);
-    setIsCallAccepted(true);
+
+    // send sender to acknowledgement that you accepted the call
+    socket.emit("inCall", { to: userId, room: chatId });
+    toast.success("Call Started");
+    setInCall(true);
+    setIncomingCall(null);
   };
 
   // handleReject
-  const handleReject = () => {};
+  const handleReject = () => {
+    if(!incomingCall) return;
+    setIncomingCall(null);
+    
+    // send other user to acknowledgement that you declined the call
+    socket.emit("declined", { to: userId, room: chatId });
+  };
+
+  // handleEndCall
+  const handleEndCall = () => {
+    if (incomingCall) return;
+    setRoomName(null);
+    setInCall(false);
+
+    // send other user to acknowledgement that you declined the call
+    socket.emit("endCall", { to: userId, room: chatId });
+    toast.success("Call Ended");
+  };
 
   // sendMessage
   const sendMessage = () => {
@@ -254,7 +278,29 @@ const Page = () => {
     const handleIncomingCall = ({ fromUserId, room }: any) => {
       console.log("incomingCall");
       setIncomingCall({ fromUserId, room });
-      setIsCallModal(true);
+    };
+
+    // handle inCall
+    const handleInCall = ({ toUserId, room }: any) => {
+      console.log("inCall");
+      setInCall(true);
+      toast.success("Call Accepted");
+    };
+
+    // handle endCall
+    const handleEndCallSocket = ({ toUserId, room }: any) => {
+      console.log("endCall");
+      setInCall(false);
+      setRoomName(null);
+      toast.success("Call ended");
+    };
+
+    // handle declined
+    const handleDeclined = ({ toUserId, room }: any) => {
+      console.log("declined");
+      setRoomName(null);
+      setIsCallStart(false);
+      toast.success("Call declined");
     };
 
     // socket handlers
@@ -265,6 +311,9 @@ const Page = () => {
     socket.on("receiveMessage", handleReceiveMessage);
     socket.on("reloadChat", handleReloadChat);
     socket.on("incomingCall", handleIncomingCall);
+    socket.on("inCall", handleInCall);
+    socket.on("endCall", handleEndCallSocket);
+    socket.on("declined", handleDeclined);
 
     // socket connection
     if (!socket.connected) {
@@ -286,6 +335,9 @@ const Page = () => {
       socket.off("receiveMessage", handleReceiveMessage);
       socket.off("reloadChat", handleReloadChat);
       socket.off("incomingCall", handleIncomingCall);
+      socket.off("inCall", handleInCall);
+      socket.off("endCall", handleEndCallSocket);
+      socket.off("declined", handleDeclined);
     };
   }, [chatId, userDetails]);
 
@@ -375,9 +427,15 @@ const Page = () => {
             <IoCallOutline className="text-2xl text-slate-950" />
           </button>
 
-          <button onClick={handleVideoCall} className="cursor-pointer">
-            <IoVideocamOutline className="text-3xl text-slate-900" />
-          </button>
+          {!inCall ? (
+            <button onClick={handleVideoCall} className="cursor-pointer">
+              <IoVideocamOutline className="text-3xl text-slate-900" />
+            </button>
+          ) : (
+            <button className="cursor-pointer">
+              <IoVideocamOutline className="text-3xl text-slate-900 opacity-20" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -456,7 +514,7 @@ const Page = () => {
 
       {/* accept/ decline */}
       <AnimatePresence mode="wait">
-        {isCallModal && !isCallAccepted && incomingCall && (
+        {!inCall && incomingCall && (
           <motion.div
             className="flex items-center gap-3 bg-slate-200 z-50 px-4 py-3 rounded-md absolute top-12 shadow-xl left-[50%] right-[50%] -translate-x-[50%] w-fit"
             initial={{ y: -20 }}
@@ -494,8 +552,14 @@ const Page = () => {
             audio
           >
             <GridContent />
-            <div className="mt-2 absolute bottom-5 right-4">
-              <CustomControlBar setToken={setToken} setRoomName={setRoomName} setIsCallAccepted={setIsCallAccepted} setIsCallStart={setIsCallStart} />
+            <div className="mt-2 absolute bottom-5 right-4 flex items-center gap-4">
+              <CustomControlBar
+                setToken={setToken}
+                setRoomName={setRoomName}
+                setIsCallAccepted={setInCall}
+                setIsCallStart={setIsCallStart}
+              />
+              <button onClick={handleEndCall} className="bg-red-500 text-white rounded-full w-12 h-12 cursor-pointer flex items-center justify-center"><MdCallEnd className="text-2xl" /></button>
             </div>
           </LiveKitRoom>
         </div>
@@ -523,14 +587,23 @@ const GridContent = () => {
   return (
     <div className="grid grid-cols-1 gap-0 bg-red-400 h-full">
       {tracks.map((trackRef: any, index: number) => (
-        <ParticipantTile key={index} trackRef={trackRef} className="bg-gray-800" />
+        <ParticipantTile
+          key={index}
+          trackRef={trackRef}
+          className="bg-gray-800"
+        />
       ))}
     </div>
   );
 };
 
 // CustomControlBar
-const CustomControlBar = ({ setToken, setRoomName, setIsCallAccepted, setIsCallStart }: any) => {
+const CustomControlBar = ({
+  setToken,
+  setRoomName,
+  setIsCallAccepted,
+  setIsCallStart,
+}: any) => {
   const room = useRoomContext();
   const { localParticipant } = useLocalParticipant();
 
