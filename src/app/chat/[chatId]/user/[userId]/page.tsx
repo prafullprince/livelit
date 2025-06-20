@@ -41,11 +41,13 @@ import {
   TrackReferenceOrPlaceholder,
   useRoomContext,
   useLocalParticipant,
+  
 } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { MdCallEnd, MdKeyboardVoice, MdMicOff } from "react-icons/md";
-import { LuCamera, LuCameraOff } from "react-icons/lu";
+import { LuCamera, LuCameraOff, LuSwitchCamera } from "react-icons/lu";
 import { IoMdExit } from "react-icons/io";
+import { createLocalVideoTrack, Track, LocalParticipant as LivekitClientLocalParticipant, Room, LocalVideoTrack, VideoPresets } from "livekit-client";
 
 // Define types for better maintainability
 interface Message {
@@ -95,6 +97,7 @@ const Page = () => {
   const [incomingCall, setIncomingCall] = useState<null | any>(null);
   const [inCall, setInCall] = useState(false);
   const [refreshCallButton, setRefreshCallButton] = useState<boolean>(false);
+  const [isVideoCall, setIsVideoCall] = useState<boolean>(true);
 
   // handleVideoCall
   const handleVideoCall = async () => {
@@ -115,6 +118,7 @@ const Page = () => {
       to: userId,
       from: userDetails?._id,
       room: chatId,
+      isVideoCall: isVideoCall,
     });
   };
 
@@ -136,9 +140,9 @@ const Page = () => {
 
   // handleReject
   const handleReject = () => {
-    if(!incomingCall) return;
+    if (!incomingCall) return;
     setIncomingCall(null);
-    
+
     // send other user to acknowledgement that you declined the call
     socket.emit("declined", { to: userId, room: chatId });
   };
@@ -150,7 +154,7 @@ const Page = () => {
     localStorage.removeItem("roomName");
     setInCall(false);
     setIncomingCall(null);
-    setRefreshCallButton((prev:any) => !prev);
+    setRefreshCallButton((prev: any) => !prev);
 
     // send other user to acknowledgement that you declined the call
     socket.emit("endCall", { to: userId, room: chatId });
@@ -278,9 +282,10 @@ const Page = () => {
     };
 
     // handle incomingCall
-    const handleIncomingCall = ({ fromUserId, room }: any) => {
+    const handleIncomingCall = ({ fromUserId, room, video }: any) => {
       console.log("incomingCall");
       setIncomingCall({ fromUserId, room });
+      setIsVideoCall(video);
     };
 
     // handle inCall
@@ -297,7 +302,7 @@ const Page = () => {
       setRoomName(null);
       localStorage.removeItem("roomName");
       setIncomingCall(null);
-      setRefreshCallButton((prev:any) => !prev);
+      setRefreshCallButton((prev: any) => !prev);
       toast.success("Call ended");
     };
 
@@ -308,7 +313,7 @@ const Page = () => {
       localStorage.removeItem("roomName");
       setIsCallStart(false);
       setIncomingCall(null);
-      setRefreshCallButton((prev:any) => !prev);
+      setRefreshCallButton((prev: any) => !prev);
       toast.success("Call declined");
     };
 
@@ -432,12 +437,24 @@ const Page = () => {
 
         {/* icon */}
         <div className="flex items-center gap-6 mr-4">
-          <button className="cursor-pointer">
+          <button
+            onClick={() => {
+              setIsVideoCall(false);
+              handleVideoCall();
+            }}
+            className="cursor-pointer"
+          >
             <IoCallOutline className="text-2xl text-slate-950" />
           </button>
 
           {!inCall ? (
-            <button onClick={handleVideoCall} className="cursor-pointer">
+            <button
+              onClick={() => {
+                setIsVideoCall(true);
+                handleVideoCall();
+              }}
+              className="cursor-pointer"
+            >
               <IoVideocamOutline className="text-3xl text-slate-900" />
             </button>
           ) : (
@@ -557,18 +574,18 @@ const Page = () => {
             token={token}
             serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL}
             connect
-            video
+            video={isVideoCall}
             audio
           >
             <GridContent />
             <div className="mt-2 absolute bottom-5 right-4 flex items-center gap-4">
-              <CustomControlBar
-                setToken={setToken}
-                setRoomName={setRoomName}
-                setIsCallAccepted={setInCall}
-                setIsCallStart={setIsCallStart}
-              />
-              <button onClick={handleEndCall} className="bg-red-500 text-white rounded-full w-12 h-12 cursor-pointer flex items-center justify-center"><MdCallEnd className="text-2xl" /></button>
+              <CustomControlBar isVideoCall={isVideoCall} />
+              <button
+                onClick={handleEndCall}
+                className="bg-red-500 text-white rounded-full w-12 h-12 cursor-pointer flex items-center justify-center"
+              >
+                <MdCallEnd className="text-2xl" />
+              </button>
             </div>
           </LiveKitRoom>
         </div>
@@ -607,12 +624,7 @@ const GridContent = () => {
 };
 
 // CustomControlBar
-const CustomControlBar = ({
-  setToken,
-  setRoomName,
-  setIsCallAccepted,
-  setIsCallStart,
-}: any) => {
+const CustomControlBar = ({ isVideoCall }: any) => {
   const room = useRoomContext();
   const { localParticipant } = useLocalParticipant();
 
@@ -626,8 +638,10 @@ const CustomControlBar = ({
     await localParticipant.setCameraEnabled(!isCamEnabled);
   };
 
+
   return (
     <div className="bg-slate-700 w-fit px-4 py-3 rounded-lg flex items-center gap-6">
+      {/* mic off on */}
       <button onClick={toggleMic} className="text-white cursor-pointer">
         {localParticipant.isMicrophoneEnabled ? (
           <MdKeyboardVoice className="text-2xl" />
@@ -635,14 +649,27 @@ const CustomControlBar = ({
           <MdMicOff className="text-2xl" />
         )}
       </button>
-      <button onClick={toggleCamera} className="text-white cursor-pointer">
-        {localParticipant.isCameraEnabled ? (
-          <LuCamera className="text-2xl" />
-        ) : (
-          <LuCameraOff className="text-2xl" />
-        )}
-      </button>
-      <button
+
+      {/* camera off on */}
+      {isVideoCall && (
+        <button onClick={toggleCamera} className="text-white cursor-pointer">
+          {localParticipant.isCameraEnabled ? (
+            <LuCamera className="text-2xl" />
+          ) : (
+            <LuCameraOff className="text-2xl" />
+          )}
+        </button>
+      )}
+
+      {/* camera switch */}
+      {isVideoCall && (
+        <button>
+          <LuSwitchCamera className="text-2xl text-white font-bold" />
+        </button>
+      )}
+
+      {/* exit */}
+      {/* <button
         onClick={() => {
           room.disconnect();
 
@@ -654,7 +681,7 @@ const CustomControlBar = ({
         className="text-red-500 cursor-pointer"
       >
         <IoMdExit className="text-2xl" />
-      </button>
+      </button> */}
     </div>
   );
 };
